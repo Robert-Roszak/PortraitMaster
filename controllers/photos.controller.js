@@ -1,4 +1,5 @@
 const Photo = require('../models/photo.model');
+const Voter = require('../models/voter.model');
 const sanitize = require('mongo-sanitize');
 
 /****** SUBMIT PHOTO ********/
@@ -7,10 +8,6 @@ exports.add = async (req, res) => {
 
   try {
     const { title, author, email } = req.fields;
-
-    for (const param in req.fields) {
-      sanitize(req.fields[param]);
-    };
 
     function escape(html) {
       return html.replace(/&/g, "&amp;")
@@ -27,7 +24,7 @@ exports.add = async (req, res) => {
     const fileName = file.path.split('/').slice(-1)[0]; // cut only filename from full path, e.g. C:/test/abc.jpg -> abc.jpg
     const fileExt = fileName.split('.').slice(-1)[0];
 
-    if(cleanTitle.length <= 25 && cleanAuthor.length <= 50 && email.includes('@') && file && (fileExt === 'jpg' || fileExt === 'gif' || fileExt === 'png')) {
+    if(cleanTitle && cleanAuthor && email.includes('@') && file && (fileExt === 'jpg' || fileExt === 'gif' || fileExt === 'png')) {
       const newPhoto = new Photo({ title: cleanTitle, author: cleanAuthor, email, src: fileName, votes: 0 });
       await newPhoto.save();
       res.json(newPhoto);
@@ -59,14 +56,32 @@ exports.vote = async (req, res) => {
 
   try {
     const photoToUpdate = await Photo.findOne({ _id: req.params.id });
+    const voterIP = req.clientIp;
+    const voter = await Voter.findOne({ user: voterIP })
+
     if(!photoToUpdate) res.status(404).json({ message: 'Not found' });
     else {
-      photoToUpdate.votes++;
-      photoToUpdate.save();
+      if (!voter) {
+        const newVoter = new Voter({ user: voterIP, votes: req.params.id });
+        await newVoter.save();
+
+        photoToUpdate.votes++;
+        await photoToUpdate.save();
+      }
+      else {
+        if (!voter.votes.includes(req.params.id)) {
+          voter.votes.push(req.params.id);
+          await voter.save();
+          
+          photoToUpdate.votes++;
+          await photoToUpdate.save();
+        }
+        else throw new Error('You have already voted for that picture!');
+      }
       res.send({ message: 'OK' });
     }
-  } catch(err) {
+  }
+  catch(err) {
     res.status(500).json(err);
   }
-
 };
